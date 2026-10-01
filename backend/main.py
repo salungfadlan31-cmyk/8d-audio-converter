@@ -1,83 +1,56 @@
 import sys
 import os
 import time
-import uuid
-import shutil
+import tempfile
 import asyncio
 from pathlib import Path
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks
-from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi.responses import Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 # ---------------------------------------------------------------------------
-# Path setup – add the project root so we can import the existing Python
+# Path setup – add project root so we can import the existing Python
 # audio engine (effects/, utils/, settings.py) without modification.
 # ---------------------------------------------------------------------------
 PROJECT_ROOT = Path(__file__).resolve().parent.parent  # 8d-slow-reverb-main/
 sys.path.insert(0, str(PROJECT_ROOT))
 
+# ---------------------------------------------------------------------------
+# FFmpeg configuration via imageio-ffmpeg:
+# Ensures static Linux binary is used on Vercel production,
+# and platform binary is used in local development, without requiring
+# manual FFmpeg installation on the host system.
+# ---------------------------------------------------------------------------
 from pydub import AudioSegment
 
-BASE_DIR   = Path(__file__).resolve().parent
-UPLOADS    = BASE_DIR / "uploads"
-OUTPUTS    = BASE_DIR / "outputs"
-UPLOADS.mkdir(exist_ok=True)
-OUTPUTS.mkdir(exist_ok=True)
+try:
+    import imageio_ffmpeg
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    AudioSegment.converter = ffmpeg_exe
+    ffmpeg_dir = os.path.dirname(ffmpeg_exe)
+    if ffmpeg_dir not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = f"{ffmpeg_dir}{os.pathsep}{os.environ.get('PATH', '')}"
+    print(f"[FFmpeg] Configured binary at: {ffmpeg_exe}")
+except Exception as e:
+    print(f"[FFmpeg] Notice: Could not initialize imageio_ffmpeg ({e}). Falling back to system FFmpeg.")
 
+# ---------------------------------------------------------------------------
+# Constants
+# Vercel Serverless Function incoming/outgoing payload limit is 4.5 MB.
+# ---------------------------------------------------------------------------
 ALLOWED_EXTENSIONS = {".mp3", ".wav"}
-MAX_FILE_SIZE      = 50 * 1024 * 1024  # 50 MB
-FILE_TTL_SECONDS   = 300               # 5 menit (otomatis hapus jika tidak di-download/ditinggal)
-DOWNLOAD_GRACE_SEC = 20                # 20 detik grace period setelah download mulai
-
-# ---------------------------------------------------------------------------
-# Background periodic cleanup (Hapus file yang berumur > 5 menit)
-# ---------------------------------------------------------------------------
-async def periodic_cleanup_task():
-    """Berjalan di background setiap 30 detik untuk menghapus file > 5 menit."""
-    while True:
-        try:
-            now = time.time()
-            cutoff = now - FILE_TTL_SECONDS
-            for directory in [UPLOADS, OUTPUTS]:
-                for item in directory.glob("*"):
-                    if item.is_file() and item.name != ".gitkeep":
-                        try:
-                            if item.stat().st_mtime < cutoff:
-                                item.unlink()
-                                print(f"[AutoClean 5m] File expired dihapus: {item.name}")
-                        except Exception as e:
-                            print(f"[AutoClean] Gagal hapus {item.name}: {e}")
-        except Exception as e:
-            print(f"[AutoClean] Error background cleaner: {e}")
-        await asyncio.sleep(30)
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Startup: jalankan background auto cleaner
-    cleanup_task = asyncio.create_task(periodic_cleanup_task())
-    yield
-    # Shutdown: batalkan task secara rapi
-    cleanup_task.cancel()
-    try:
-        await cleanup_task
-    except asyncio.CancelledError:
-        pass
-
+MAX_FILE_SIZE      = int(4.5 * 1024 * 1024)  # 4.5 MB (Vercel Function payload limit)
 
 # ---------------------------------------------------------------------------
 # App initialization
 # ---------------------------------------------------------------------------
 app = FastAPI(
     title="8D Audio Converter API",
-    version="1.1.0",
-    lifespan=lifespan,
+    version="1.2.0",
 )
 
 # ---------------------------------------------------------------------------
-# CORS – allow Next.js dev server and production origin
+# CORS – for local standalone development
 # ---------------------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
@@ -85,23 +58,20 @@ app.add_middleware(
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://localhost:3001",
-        "https://8d-audio-converter-4ls6.vercel.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Serve processed audio files as static content (untuk preview audio player)
-app.mount("/outputs", StaticFiles(directory=str(OUTPUTS)), name="outputs")
-
 
 # ---------------------------------------------------------------------------
-# Helper: run the 8D processing pipeline
+# Helper: run the 8D processing pipeline using the existing engine
 # ---------------------------------------------------------------------------
 def process_audio(input_path: Path, output_path: Path) -> None:
     """
     Runs the full 8D + slow + reverb pipeline using the existing engine.
+    File paths are in temporary directories, keeping the filesystem clean.
     """
     import importlib
     import settings as _settings
@@ -144,30 +114,6 @@ def process_audio(input_path: Path, output_path: Path) -> None:
         _settings.outputFile = original_output
 
 
-def cleanup_files(*paths: Path) -> None:
-    """Hapus file secara aman tanpa throw error."""
-    for p in paths:
-        try:
-            if p.exists() and p.name != ".gitkeep":
-                p.unlink()
-        except Exception:
-            pass
-
-
-async def delayed_delete_file(file_path: Path, delay_seconds: int = DOWNLOAD_GRACE_SEC) -> None:
-    """
-    Menghapus file setelah waktu jeda (grace period) agar proses streaming download
-    ke browser user selesai 100% sebelum file fisik dihapus dari disk.
-    """
-    await asyncio.sleep(delay_seconds)
-    try:
-        if file_path.exists() and file_path.name != ".gitkeep":
-            file_path.unlink()
-            print(f"[AutoClean Download] Sukses menghapus file setelah di-download: {file_path.name}")
-    except Exception as e:
-        print(f"[AutoClean Download] Gagal hapus {file_path.name}: {e}")
-
-
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -183,11 +129,16 @@ async def health():
 
 
 @app.post("/api/process")
-async def process(
-    background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-):
-    # --- Validasi tipe file ---
+async def process(file: UploadFile = File(...)):
+    """
+    One-Shot Processing Endpoint:
+    Menerima audio, memproses via pipeline 8D, dan langsung mengembalikan file MP3
+    sebagai binary response (audio/mpeg).
+    
+    Arsitektur ini menghilangkan ketergantungan pada disk lokal antar-request,
+    sehingga 100% aman untuk lingkungan serverless Vercel yang stateless dan ephemeral.
+    """
+    # 1. Validasi tipe file
     original_name = file.filename or "audio"
     ext = Path(original_name).suffix.lower()
     if ext not in ALLOWED_EXTENSIONS:
@@ -196,83 +147,76 @@ async def process(
             detail=f"Tipe file '{ext}' tidak didukung. Hanya MP3 dan WAV yang diperbolehkan.",
         )
 
-    # --- Validasi ukuran file (Max 50MB) ---
+    # 2. Validasi ukuran file (Max 4.5 MB sesuai batas Vercel Function payload)
     content = await file.read()
     if len(content) > MAX_FILE_SIZE:
         raise HTTPException(
             status_code=413,
-            detail="File terlalu besar. Maksimal ukuran file adalah 50 MB.",
+            detail="File terlalu besar. Maksimal ukuran file adalah 4.5 MB untuk serverless processing.",
         )
 
-    # --- Simpan file upload sementara ---
-    job_id     = uuid.uuid4().hex
-    input_path = UPLOADS / f"{job_id}{ext}"
-    input_path.write_bytes(content)
+    stem = Path(original_name).stem
+    output_filename = f"{stem}_8d.mp3"
 
-    # Output selalu berformat MP3
-    stem        = Path(original_name).stem
-    output_path = OUTPUTS / f"{job_id}_{stem}_8d"
+    # 3. Proses di temporary directory (writable di Vercel /tmp)
+    # Semua file (input, intermediate WAV, output MP3) otomatis dibersihkan saat blok selesai.
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_dir_path = Path(temp_dir)
+        input_path = temp_dir_path / f"input{ext}"
+        input_path.write_bytes(content)
 
-    try:
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, process_audio, input_path, output_path)
-    except Exception as exc:
-        cleanup_files(input_path)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Pemrosesan audio gagal: {str(exc)}",
-        )
+        output_path = temp_dir_path / f"{stem}_8d"
 
-    final_mp3 = output_path.with_suffix(".mp3")
-    if not final_mp3.exists():
-        cleanup_files(input_path)
-        raise HTTPException(status_code=500, detail="Pemrosesan selesai tapi file output tidak ditemukan.")
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, process_audio, input_path, output_path)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Pemrosesan audio gagal: {str(exc)}",
+            )
 
-    # Jadwalkan pembersihan langsung untuk input upload sementara
-    background_tasks.add_task(cleanup_files, input_path)
+        final_mp3 = output_path.with_suffix(".mp3")
+        if not final_mp3.exists():
+            raise HTTPException(
+                status_code=500,
+                detail="Pemrosesan selesai namun file output tidak ditemukan.",
+            )
 
-    file_url = f"/outputs/{final_mp3.name}"
-    return JSONResponse({
-        "success":   True,
-        "file_url":  file_url,
-        "file_name": final_mp3.name,
-        "original":  original_name,
-    })
+        mp3_bytes = final_mp3.read_bytes()
+
+    # 4. Return one-shot response langsung sebagai audio/mpeg
+    return Response(
+        content=mp3_bytes,
+        media_type="audio/mpeg",
+        headers={
+            "Content-Disposition": f'attachment; filename="{output_filename}"',
+            "X-Filename": output_filename,
+            "X-Original-Filename": original_name,
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Access-Control-Expose-Headers": "Content-Disposition, X-Filename, X-Original-Filename",
+        },
+    )
 
 
 @app.get("/api/download/{filename}")
-async def download_file(filename: str, background_tasks: BackgroundTasks):
+async def download_file(filename: str):
     """
-    Mengunduh file MP3 hasil konversi dan menjadwalkan penghapusan otomatis
-    setelah 20 detik (agar browser selesai download sebelum file dihapus).
+    Fallback endpoint untuk kompatibilitas.
+    Pada arsitektur one-shot, file audio sudah langsung berada di browser client.
     """
-    safe_name = Path(filename).name
-    file_path = OUTPUTS / safe_name
-
-    if not file_path.exists():
-        raise HTTPException(
-            status_code=404,
-            detail="File audio sudah tidak tersedia atau telah otomatis dibersihkan.",
-        )
-
-    # Auto clean setelah download (diberi jeda 20 detik)
-    background_tasks.add_task(delayed_delete_file, file_path, delay_seconds=DOWNLOAD_GRACE_SEC)
-
-    return FileResponse(
-        path=str(file_path),
-        filename=safe_name,
-        media_type="audio/mpeg",
-        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+    return JSONResponse(
+        status_code=200,
+        content={
+            "message": "File audio sudah di-stream langsung ke browser saat pemrosesan selesai."
+        },
     )
 
 
 @app.post("/api/cleanup/{filename}")
 async def manual_cleanup(filename: str):
     """
-    Dijalankan saat user klik 'Convert Another Audio' atau menutup browser.
-    Langsung menghapus file dari disk server.
+    Fallback cleanup endpoint untuk kompatibilitas.
+    Pada arsitektur one-shot, disk server sudah langsung bersih via TemporaryDirectory.
     """
-    safe_name = Path(filename).name
-    file_path = OUTPUTS / safe_name
-    cleanup_files(file_path)
-    return {"success": True, "message": f"Cleaned up {safe_name}"}
+    return {"success": True, "message": f"Cleaned up {filename}"}

@@ -6,8 +6,8 @@ interface Props {
   onFileSelected: (file: File) => void;
 }
 
-const MAX_SIZE_MB = 50;
-const MAX_SIZE    = MAX_SIZE_MB * 1024 * 1024;
+const MAX_SIZE_MB = 4.5;
+const MAX_SIZE    = Math.floor(MAX_SIZE_MB * 1024 * 1024);
 const ALLOWED     = ["audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/wave"];
 const ALLOWED_EXT = [".mp3", ".wav"];
 

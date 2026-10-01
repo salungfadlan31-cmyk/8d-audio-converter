@@ -13,7 +13,10 @@ export interface ProcessResult {
   original: string;
 }
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+// BACKEND_URL dikosongkan di production → browser pakai relative path /api/... (same-origin)
+// Next.js server yang proxy ke backend via rewrites di next.config.ts
+// Untuk dev lokal: set NEXT_PUBLIC_BACKEND_URL= (kosong) di .env.local
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "";
 
 export default function HomePage() {
   const [appState, setAppState] = useState<AppState>("idle");
@@ -58,14 +61,20 @@ export default function HomePage() {
         throw new Error(detail);
       }
 
-      const data = await response.json();
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+
+      // Ambil nama file dari header X-Filename atau generate dari nama file asli
+      const headerFilename = response.headers.get("X-Filename");
+      const fallbackStem = file.name.replace(/\.[^/.]+$/, "");
+      const outputFileName = headerFilename || `${fallbackStem}_8d.mp3`;
 
       // ── Step 4: Done ────────────────────────────────────────
       setProgress(4);
       setResult({
-        fileUrl:  `${BACKEND_URL}${data.file_url}`,
-        fileName: data.file_name,
-        original: data.original,
+        fileUrl:  objectUrl,
+        fileName: outputFileName,
+        original: file.name,
       });
       setAppState("done");
     } catch (err: unknown) {
@@ -75,7 +84,7 @@ export default function HomePage() {
     }
   };
 
-  // Bersihkan file di backend jika user menutup tab atau meninggalkan halaman
+  // Bersihkan memory dan beri tahu backend jika user menutup tab atau meninggalkan halaman
   useEffect(() => {
     const handleBeforeUnload = () => {
       if (result?.fileName) {
@@ -87,6 +96,9 @@ export default function HomePage() {
   }, [result]);
 
   const handleReset = () => {
+    if (result?.fileUrl && result.fileUrl.startsWith("blob:")) {
+      URL.revokeObjectURL(result.fileUrl);
+    }
     if (result?.fileName) {
       fetch(`${BACKEND_URL}/api/cleanup/${result.fileName}`, { method: "POST" }).catch(() => {});
     }
@@ -266,7 +278,7 @@ export default function HomePage() {
                 🔄 Convert Another Audio
               </button>
               <a
-                href={`${BACKEND_URL}/api/download/${result.fileName}`}
+                href={result.fileUrl}
                 download={result.fileName}
                 style={{ flex: 1, textDecoration: "none" }}
               >
