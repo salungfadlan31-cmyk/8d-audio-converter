@@ -5,10 +5,9 @@ import type { ProcessResult } from "@/app/page";
 
 interface Props {
   result: ProcessResult;
-  backendUrl: string;
 }
 
-export default function AudioPlayer({ result, backendUrl }: Props) {
+export default function AudioPlayer({ result }: Props) {
   const audioRef           = useRef<HTMLAudioElement>(null);
   const progressBarRef     = useRef<HTMLDivElement>(null);
   const [isPlaying, setIsPlaying]       = useState(false);

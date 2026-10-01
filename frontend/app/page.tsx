@@ -13,10 +13,9 @@ export interface ProcessResult {
   original: string;
 }
 
-// BACKEND_URL dikosongkan di production → browser pakai relative path /api/... (same-origin)
-// Next.js server yang proxy ke backend via rewrites di next.config.ts
-// Untuk dev lokal: set NEXT_PUBLIC_BACKEND_URL= (kosong) di .env.local
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "";
+// Frontend menggunakan relative path /api/... (same-origin).
+// Vercel Services di vercel.json meneruskan /api/* ke backend FastAPI.
+// TIDAK ada env var yang mengontrol base URL ini – URL hardcoded relative path.
 
 export default function HomePage() {
   const [appState, setAppState] = useState<AppState>("idle");
@@ -44,7 +43,7 @@ export default function HomePage() {
       const stepTimer1 = setTimeout(() => setProgress(2), 4000);
       const stepTimer2 = setTimeout(() => setProgress(3), 9000);
 
-      const response = await fetch(`${BACKEND_URL}/api/process`, {
+      const response = await fetch("/api/process", {
         method: "POST",
         body: formData,
       });
@@ -88,7 +87,7 @@ export default function HomePage() {
   useEffect(() => {
     const handleBeforeUnload = () => {
       if (result?.fileName) {
-        navigator.sendBeacon(`${BACKEND_URL}/api/cleanup/${result.fileName}`);
+        navigator.sendBeacon(`/api/cleanup/${result.fileName}`);
       }
     };
     window.addEventListener("beforeunload", handleBeforeUnload);
@@ -100,7 +99,7 @@ export default function HomePage() {
       URL.revokeObjectURL(result.fileUrl);
     }
     if (result?.fileName) {
-      fetch(`${BACKEND_URL}/api/cleanup/${result.fileName}`, { method: "POST" }).catch(() => {});
+      fetch(`/api/cleanup/${result.fileName}`, { method: "POST" }).catch(() => {});
     }
     setAppState("idle");
     setResult(null);
@@ -260,7 +259,7 @@ export default function HomePage() {
         {/* DONE – show player */}
         {appState === "done" && result && (
           <div className="fade-in">
-            <AudioPlayer result={result} backendUrl={BACKEND_URL} />
+            <AudioPlayer result={result} />
             <div
               style={{
                 display: "flex",
