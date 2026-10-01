@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import AudioUploader from "@/components/AudioUploader";
 import ProcessingStatus from "@/components/ProcessingStatus";
 import AudioPlayer from "@/components/AudioPlayer";
@@ -75,7 +75,21 @@ export default function HomePage() {
     }
   };
 
+  // Bersihkan file di backend jika user menutup tab atau meninggalkan halaman
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (result?.fileName) {
+        navigator.sendBeacon(`${BACKEND_URL}/api/cleanup/${result.fileName}`);
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [result]);
+
   const handleReset = () => {
+    if (result?.fileName) {
+      fetch(`${BACKEND_URL}/api/cleanup/${result.fileName}`, { method: "POST" }).catch(() => {});
+    }
     setAppState("idle");
     setResult(null);
     setError("");
@@ -252,7 +266,7 @@ export default function HomePage() {
                 🔄 Convert Another Audio
               </button>
               <a
-                href={result.fileUrl}
+                href={`${BACKEND_URL}/api/download/${result.fileName}`}
                 download={result.fileName}
                 style={{ flex: 1, textDecoration: "none" }}
               >

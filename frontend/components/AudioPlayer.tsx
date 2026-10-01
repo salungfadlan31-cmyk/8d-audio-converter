@@ -297,7 +297,7 @@ export default function AudioPlayer({ result, backendUrl }: Props) {
 
         {/* Download button */}
         <a
-          href={result.fileUrl}
+          href={`${backendUrl}/api/download/${result.fileName}`}
           download={result.fileName}
           style={{ textDecoration: "none", flexShrink: 0 }}
         >
