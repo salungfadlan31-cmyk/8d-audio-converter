@@ -6,11 +6,11 @@
 
 ## ✨ Features
 
-- 🎵 Upload **MP3** or **WAV** (max 50 MB)
-- ⚙️ Full **8D + slow + reverb** processing pipeline (existing Python engine)
-- 🎧 Built-in **audio player** with waveform visualizer
-- 📥 One-click **MP3 download**
-- 💜 Beautiful **dark glassmorphism** UI
+- Upload **MP3** or **WAV** (max 50 MB)
+- Full **8D + slow + reverb** processing pipeline (existing Python engine)
+- Built-in **audio player** with waveform visualizer
+- One-click **MP3 download**
+- Beautiful **dark glassmorphism** UI
 
 ---
 
@@ -50,7 +50,7 @@
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -104,7 +104,7 @@ The app will be available at: **http://localhost:3000**
 
 ---
 
-## 🌐 API Reference
+## API Reference
 
 ### `POST /api/process`
 
@@ -130,7 +130,7 @@ Returns the processed MP3 file for playback or download.
 
 ---
 
-## 🔧 Configuration
+## Configuration
 
 ### Backend (`settings.py`)
 
@@ -152,7 +152,7 @@ Change this URL when deploying to production.
 
 ---
 
-## 📦 Dependencies
+## Dependencies
 
 ### Python (backend)
 
@@ -177,7 +177,7 @@ Change this URL when deploying to production.
 
 ---
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 **`pydub` can't find FFmpeg**
 ```
@@ -204,6 +204,6 @@ npm run dev -- --port 3001
 
 ---
 
-## 📄 License
+## License
 
 MIT — use freely, credit appreciated.
