@@ -14,7 +14,7 @@ export interface ProcessResult {
 }
 
 // Frontend menggunakan relative path /api/... (same-origin).
-// Vercel Services di vercel.json meneruskan /api/* ke backend FastAPI.
+// Vercel rewrite / Next.js rewrites meneruskan /api/* ke backend FastAPI Cloud.
 // TIDAK ada env var yang mengontrol base URL ini – URL hardcoded relative path.
 
 export default function HomePage() {

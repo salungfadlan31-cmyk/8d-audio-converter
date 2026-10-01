@@ -1,9 +1,14 @@
 import type { NextConfig } from "next";
 
-// Routing /api/* dan /outputs/* ke backend ditangani oleh Vercel Services di vercel.json root.
-// Tidak diperlukan rewrites Next.js ke URL backend eksternal.
-// Untuk local dev gunakan: vercel dev (dari root project), bukan next dev langsung.
-const nextConfig: NextConfig = {};
+const nextConfig: NextConfig = {
+  async rewrites() {
+    return [
+      {
+        source: "/api/:path*",
+        destination: "https://a8d-audio-converter-1285a4af.fastapicloud.dev/api/:path*",
+      },
+    ];
+  },
+};
 
 export default nextConfig;
-
