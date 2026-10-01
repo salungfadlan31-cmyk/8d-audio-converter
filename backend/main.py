@@ -85,7 +85,7 @@ app.add_middleware(
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://localhost:3001",
-        "https://8d-audio-converter-pi.vercel.app",
+        "https://8d-audio-converter-4ls6.vercel.app/",
         "*"
     ],
     allow_credentials=True,
