@@ -5,7 +5,7 @@ const nextConfig: NextConfig = {
     return [
       {
         source: "/api/:path*",
-        destination: "https://a8d-audio-converter-1285a4af.fastapicloud.dev/api/:path*",
+        destination: "https://a8d-audio-converter-fcfd3e30.fastapicloud.dev/api/:path*",
       },
     ];
   },
